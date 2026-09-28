@@ -6,15 +6,16 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.metrics import r2_score, mean_absolute_percentage_error
 from sklearn.tree import export_text, plot_tree, DecisionTreeRegressor, export_graphviz
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, confusion_matrix
 import src.data as da
 
-X, y, X_test, y_test = da.read_data()
+X, y, X_test, y_test, X_val, y_val = da.read_data()
 which_to_run = None
 
-while (which_to_run != "3"):
-    print("Do you want to run polynomial regression (1), decision tree (2) exit (3): \n")
+while (which_to_run != "0"):
+    print("Do you want to run: \n polynomial regression (1) \n decision tree (2) \n random forest (3) \n exit (0): \n")
 
     which_to_run = input()
 
@@ -26,17 +27,20 @@ while (which_to_run != "3"):
         lin_regr = LinearRegression(fit_intercept=False)
         lin_regr.fit(X_poly, y)
 
-        y_pred = lin_regr.predict(X_poly)
-        r2 = r2_score(y,y_pred)
-        print("R2 of polynomial regression : ", r2)
+        # use transform (not fit_transform) on val/test so they get the same feature mapping as train
+        y_val_pred = lin_regr.predict(poly.transform(X_val))
+        y_pred = lin_regr.predict(poly.transform(X_test))
+        print("R2 of polynomial regression on validation: ", r2_score(y_val, y_val_pred))
+        r2 = r2_score(y_test, y_pred)
+        print("R2 of polynomial regression on test: ", r2)
 
 
         fig, ax = plt.subplots(figsize=(8, 8))
         ax.set_xlabel("prediction from all 7 features (MWh)")
         ax.set_ylabel("actual consumption (MWh)")
-        ax.set_title(f"Polynomial regression (degree 3) on all features, R2 = {r2:.2f}")
-        ax.scatter(y_pred, y, s=2, alpha=0.2, c="skyblue", label="training datapoints")
-        ax.plot([y.min(), y.max()], [y.min(), y.max()], color='r', linewidth=2, label="the fit (prediction = actual)")
+        ax.set_title(f"Polynomial regression (degree 3) on all features, test R2 = {r2:.2f}")
+        ax.scatter(y_pred, y_test, s=2, alpha=0.2, c="skyblue", label="test datapoints")
+        ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], color='r', linewidth=2, label="the fit (prediction = actual)")
         ax.legend()
         plt.show()
 
@@ -48,10 +52,52 @@ while (which_to_run != "3"):
         clf_tree = DecisionTreeRegressor(random_state=0, max_depth=10)
         clf_tree.fit(X, y)
 
+        print("R2 of decision tree on validation: ", r2_score(y_val, clf_tree.predict(X_val)))
         y_tree_pred = clf_tree.predict(X_test)
-        print("R2 of decision tree : ", r2_score(y_test, y_tree_pred))
+        print("R2 of decision tree on test: ", r2_score(y_test, y_tree_pred))
 
 
         plt.figure(figsize=(16, 8))
         plot_tree(clf_tree, feature_names=da.features, filled=True, max_depth=3, fontsize=8)
         plt.show()
+
+    elif (which_to_run == "3"):
+        # hyperparameters are chosen on the validation set (2024),
+        # the test set (2025) is only used once for the final chosen model
+        best_r2_val = -np.inf
+        best_forest = None
+        best_params = None
+
+        for max_feat in range(1, len(da.features) + 1):
+            for min_leaf in [1, 10]:
+                forest = RandomForestRegressor(n_estimators=100, max_features=max_feat, min_samples_leaf=min_leaf, random_state=1, n_jobs=-1)
+                forest.fit(X, y)
+
+                r2_val = r2_score(y_val, forest.predict(X_val))
+                print(f"max_features = {max_feat}, min_samples_leaf = {min_leaf}: validation R2 = {r2_val:.4f}")
+
+                if r2_val > best_r2_val:
+                    best_r2_val = r2_val
+                    best_forest = forest
+                    best_params = (max_feat, min_leaf)
+
+        print(f"\nBest: max_features = {best_params[0]}, min_samples_leaf = {best_params[1]}")
+        print("R2 of random forest on training: ", r2_score(y, best_forest.predict(X)))
+        print("R2 of random forest on validation: ", best_r2_val)
+        y_random_forest_pred = best_forest.predict(X_test)
+        r2_test = r2_score(y_test, y_random_forest_pred)
+        print("R2 of random forest on test: ", r2_test)
+        print("MAPE of random forest on test: ", mean_absolute_percentage_error(y_test, y_random_forest_pred), "\n")
+
+        for name, importance in sorted(zip(da.features, best_forest.feature_importances_), key=lambda p: -p[1]):
+            print(f"  {name}: {importance:.3f}")
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.set_xlabel("random forest prediction (MWh)")
+        ax.set_ylabel("actual consumption (MWh)")
+        ax.set_title(f"Random forest, test R2 = {r2_test:.2f}")
+        ax.scatter(y_random_forest_pred, y_test, s=2, alpha=0.2, c="skyblue", label="test datapoints")
+        ax.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], color='r', linewidth=2, label="prediction = actual")
+        ax.legend()
+        plt.show()
+
