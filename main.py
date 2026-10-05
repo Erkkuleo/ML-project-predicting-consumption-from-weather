@@ -27,7 +27,6 @@ while (which_to_run != "0"):
         lin_regr = LinearRegression(fit_intercept=False)
         lin_regr.fit(X_poly, y)
 
-        # use transform (not fit_transform) on val/test so they get the same feature mapping as train
         y_val_pred = lin_regr.predict(poly.transform(X_val))
         y_pred = lin_regr.predict(poly.transform(X_test))
         print("R2 of polynomial regression on validation: ", r2_score(y_val, y_val_pred))
@@ -45,9 +44,6 @@ while (which_to_run != "0"):
         plt.show()
 
     elif (which_to_run == "2"):
-    #====================================#
-    # Decision tree part -> this should maybe be changed to random forest in future
-    #====================================#
 
         clf_tree = DecisionTreeRegressor(random_state=0, max_depth=10)
         clf_tree.fit(X, y)
@@ -62,8 +58,6 @@ while (which_to_run != "0"):
         plt.show()
 
     elif (which_to_run == "3"):
-        # hyperparameters are chosen on the validation set (2024),
-        # the test set (2025) is only used once for the final chosen model
         best_r2_val = -np.inf
         best_forest = None
         best_params = None
