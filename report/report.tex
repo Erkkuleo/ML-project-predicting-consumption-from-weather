@@ -6,9 +6,7 @@
 %==============================================================
 \documentclass[11pt,a4paper]{article}
 
-%---------------- Fill these in -------------------------------
 \newcommand{\ReportTitle}{Predicting Finland's electricity consumption from the weather and time}
-%--------------------------------------------------------------
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -47,10 +45,10 @@
 \rhead{Project report}
 \cfoot{\thepage}
 
-% Grey guidance note -- delete these once you have written the section
-\newcommand{\guide}[1]{{\small\itshape\color{gray}(#1)}}
 % Feature / column names in typewriter font, e.g. \feat{temp_c}
 \newcommand{\feat}[1]{\texttt{\detokenize{#1}}}
+% Number the reference list as Section 6 of the required outline
+\renewcommand{\bibsection}{\section{References}}
 
 \begin{document}
 
@@ -67,9 +65,8 @@
 
 Weather affects how people use electricity. Cold weather increases demand for heating,
 while hot weather causes air conditioners to run longer. Strong winds draw heat away
-from structures more quickly, further increasing heating demand. High humidity makes
-buildings feel hotter than they actually are, increasing demand for air conditioning. Low
-humidity, on the other hand, makes buildings feel colder, increasing demand for
+from structures more quickly, further increasing heating demand. Humidity changes how
+warm a building feels, which shifts demand for both cooling and
 heating~\cite{montel2024weather}. Electricity consumption also follows daily and weekly
 patterns independent of weather, since usage tends to vary by hour of the day and by day
 of the week~\cite{eia2011demand}.
@@ -78,18 +75,31 @@ The goal of this project is to predict how weather conditions in Finland, namely
 temperature, wind, and humidity, along with the hour of day, weekday and month, affect
 electricity consumption. This is done by combining data from Fingrid, the Finnish
 electricity transmission system operator, and the Finnish Meteorological Institute (FMI).
-This report consists of an introduction, problem formulation, methods, and references.
-The methods section further consists of data preparation,
-model choice and model validation.
+
+Section~\ref{sec:problem} describes the data and formulates the task as a regression
+problem. Section~\ref{sec:methods} explains how the data was prepared and the features
+chosen, presents the three methods used (polynomial regression, a decision tree and a
+random forest) together with their loss function, and describes how the data was split
+for validation and testing. Section~\ref{sec:results} compares the training and validation
+errors of the methods, chooses the final method and reports its test error.
+Section~\ref{sec:conclusion} interprets the results, discusses the limitations of the study
+and suggests directions for future work.
 
 %==============================================================
 \section{Problem formulation}
+\label{sec:problem}
 
 The data in this study comes from Fingrid and the Finnish Meteorological Institute (FMI).
 The electricity data is the ``Electricity consumption in Finland'' dataset from Fingrid's open
 data service~\cite{fingrid2026consumption}, comprising 119\,369 measurements, and the weather
 data consists of 52\,589 hourly observations from the FMI Tapiola weather station, downloaded
 from FMI's open data service~\cite{fmi2026observations}. Both cover the years 2020--2025.
+
+Fingrid reported consumption hourly before 13 June 2023 and every 15 minutes thereafter,
+so the Fingrid data was first aggregated to hourly resolution by averaging all measurements
+within each hour. The two datasets were then merged on the hourly timestamp. 250 hours
+were discarded because they lacked temperature, wind speed or humidity observations,
+leaving a final dataset of 52\,241 data points.
 
 Each data point represents one hour and has seven numerical features: air temperature
 in degrees Celsius (\feat{temp_c}), wind speed in metres per second (\feat{wind_ms}), relative
@@ -129,26 +139,24 @@ regression problem. The first rows of the merged data are shown in Table~\ref{ta
 
 %==============================================================
 \section{Methods}
+\label{sec:methods}
 
 \subsection{Preparing the data}
-
-The dataset is composed of 52\,241 data points. It is merged from two datasets:
-Fingrid's national electricity consumption data and FMI's weather data.
-Fingrid reported consumption hourly before 13 June 2023 and every 15 minutes
-thereafter, so the Fingrid data was first aggregated to hourly resolution by averaging all
-measurements within each hour. The two datasets were then merged on the hourly
-timestamp. 250 hours were discarded because they lacked temperature, wind speed or
-humidity observations, which gives the final 52\,241 data points.
+\label{sec:data}
 
 We selected temperature, wind, and humidity based on known physical effects on
 heating and cooling demand, and included hour of day, weekday, and month to capture
-daily and seasonal consumption patterns. We decided to drop the columns \feat{time_utc},
-\feat{local_time}, \feat{hour}, and \feat{is_weekend}. Columns \feat{time_utc}, \feat{local_time},
-and \feat{hour} are redundant once cyclically encoded as \feat{hour_sin} and \feat{hour_cos}, and
-raw timestamp values are not directly usable as model features. Column \feat{is_weekend} is
-redundant given that \feat{weekday} already captures the same information.
-Figures~\ref{fig:temp}--\ref{fig:humid} show how consumption varies with each of the
-selected features.
+daily and seasonal consumption patterns. The plots in Figures~\ref{fig:temp}--\ref{fig:humid}
+and the correlation matrix in Figure~\ref{fig:corr} confirm that consumption varies with each
+of these features: temperature has by far the strongest relationship with consumption,
+consumption follows a clear daily and seasonal pattern and is lower at weekends, while wind
+speed and humidity have weaker effects.
+
+{\sloppy We decided to drop the columns \feat{time_utc}, \feat{local_time}, \feat{hour}, and
+\feat{is_weekend}. Columns \feat{time_utc}, \feat{local_time}, and \feat{hour} are redundant
+once cyclically encoded as \feat{hour_sin} and \feat{hour_cos}, and raw timestamp values are
+not directly usable as model features. Column \feat{is_weekend} is redundant given that
+\feat{weekday} already captures the same information.\par}
 
 \begin{figure}[H]
   \centering
@@ -197,49 +205,7 @@ selected features.
 Weekday and month were kept as plain integers rather than cyclically encoded.
 Unlike hour, where the wraparound between 23:00 and 00:00 occurs within a single day
 and directly affects short-term consumption patterns, the wraparound effects for
-weekday and month are less pronounced for this application. The date is only used after
-processing to sort the input data chronologically for comparison.
-
-\subsection{Model}
-
-We decided to use a linear regression model for this project, with a hypothesis space
-consisting of all linear functions of the input features \feat{temp_c}, \feat{wind_ms},
-\feat{humid_pc}, \feat{hour_sin}, \feat{hour_cos}, \feat{weekday}, and \feat{month}, together
-with the squared temperature (see below). This decision
-was made because the label we are trying to predict is continuous. Linear regression is also a
-simple baseline that trains instantly on 52\,000 rows, and its coefficients are directly
-interpretable.
-
-Since our dataset consists of data points with numeric labels, this is a regression
-problem, and we chose squared error loss as our loss function. Squared error loss
-penalizes large prediction errors much more than small ones. This is useful for our
-problem because large errors in predicted electricity consumption could cause grid
-operators to over- or under-supply electricity, which is more costly than a small prediction
-error.
-
-The correlation matrix (Figure~\ref{fig:corr}) shows a strong linear relationship between
-temperature and consumption ($r = -0.77$), which supports the use of linear predictors. The
-scatter plot in Figure~\ref{fig:temp} nevertheless shows that this relationship flattens above
-approximately 15\,\textdegree C, so a squared temperature term was added to the hypothesis
-space. The predictor remains linear in its parameters and is therefore still a linear
-regression model:
-\begin{equation}
-  \begin{split}
-  h(\mathbf{x}) = {} & w_0 + w_1 x_{\text{temp}} + w_2 x_{\text{temp}}^2 + w_3 x_{\text{wind}}
-  + w_4 x_{\text{humid}} \\
-  & + w_5 x_{\text{hour\_sin}} + w_6 x_{\text{hour\_cos}}
-  + w_7 x_{\text{weekday}} + w_8 x_{\text{month}}.
-  \end{split}
-  \label{eq:hypothesis}
-\end{equation}
-
-The weights are learned by minimising the squared error loss
-\begin{equation}
-  L\bigl((\mathbf{x}, y), h\bigr) = \bigl( y - h(\mathbf{x}) \bigr)^2,
-  \label{eq:loss}
-\end{equation}
-where $y$ is the measured consumption and $h(\mathbf{x})$ the predicted consumption
-of a data point.
+weekday and month are less pronounced for this application.
 
 \begin{figure}[htbp]
   \centering
@@ -248,28 +214,251 @@ of a data point.
   \label{fig:corr}
 \end{figure}
 
+\subsection{Models and loss function}
+\label{sec:models}
+
+Below, a data point is written as $(\mathbf{x}, y)$, where
+$\mathbf{x} = (x_1, \dots, x_7)^T$ holds the features \feat{temp_c}, \feat{wind_ms},
+\feat{humid_pc}, \feat{hour_sin}, \feat{hour_cos}, \feat{weekday} and \feat{month} in this
+order, and $y$ is the measured consumption \feat{consumption_mwh}. The training set is
+$\{(\mathbf{x}^{(i)}, y^{(i)})\}_{i=1}^{m}$.
+
+\paragraph{Loss function.}
+Since our dataset consists of data points with numeric labels, this is a regression
+problem, and we chose the squared error loss
+\begin{equation}
+  L\bigl((\mathbf{x}, y), h\bigr) = \bigl( y - h(\mathbf{x}) \bigr)^2,
+  \label{eq:loss}
+\end{equation}
+where $h(\mathbf{x})$ is the predicted consumption. Squared error loss penalizes large
+prediction errors much more than small ones. This is useful for our problem because large
+errors in predicted electricity consumption could cause grid operators to over- or
+under-supply electricity, which is more costly than a small prediction error.
+
+All three models were trained with squared error loss. The polynomial regression minimizes
+it directly over the training data. The decision tree chooses each split to minimize the
+squared error within the resulting groups of training points, and predicts the mean
+consumption of the training points in each leaf. The random forest grows 100 such trees on
+bootstrap samples with random subsets of features, and predicts the average of the trees'
+outputs. Using the same loss for all models makes their errors directly comparable.
+
+\paragraph{Polynomial regression.}
+The first model is polynomial regression. Its hypothesis space consists of all polynomials
+of degree at most $d$ in the seven features. For $d = 2$ this is
+\begin{equation}
+  h(\mathbf{x}) = w_0 + \sum_{j=1}^{7} w_j x_j + \sum_{j=1}^{7} \sum_{k=j}^{7} w_{jk}\, x_j x_k,
+  \label{eq:poly}
+\end{equation}
+which has 36 weights: one intercept, 7 linear terms, 7 squared terms ($j = k$) and 21
+pairwise products ($j < k$). The degree $d$ is a hyperparameter. We tried $d = 1$ to $4$
+and chose the value with the lowest validation error (Section~\ref{sec:val-errors}). The
+model is linear in its weights, so it is fitted as ordinary least squares on the expanded
+features, i.e.\ the weights minimize the average loss~\eqref{eq:loss} on the training set,
+\begin{equation}
+  \min_{\mathbf{w}} \; \frac{1}{m} \sum_{i=1}^{m} \bigl( y^{(i)} - h(\mathbf{x}^{(i)}) \bigr)^2 .
+  \label{eq:erm}
+\end{equation}
+
+We started from a polynomial model because the correlation matrix (Figure~\ref{fig:corr})
+shows a strong linear relationship between temperature and consumption ($r = -0.77$), and
+because it trains in seconds on about 35\,000 rows and has interpretable coefficients. A
+purely linear predictor ($d = 1$) is not enough, though. The scatter plot in
+Figure~\ref{fig:temp} shows that consumption stops falling above roughly
+15\,\textdegree C, which a straight line cannot follow, so squared terms are needed. The
+product terms let the effect of one feature depend on another: wind should raise heating
+demand more on a cold day than on a mild one, and the daily cycle may look different in
+January than in July.
+
+\paragraph{Decision tree.}
+The second model is a decision tree for regression. A tree splits the feature space into
+rectangular regions $R_1, \dots, R_K$ by asking a sequence of threshold questions on single
+features (for example $\feat{temp_c} \le 2.5$), and predicts the average training
+consumption of the region a data point falls in:
+\begin{equation}
+  h(\mathbf{x}) = \sum_{k=1}^{K} \hat{y}_k \, \mathbb{1}\{\mathbf{x} \in R_k\},
+  \qquad
+  \hat{y}_k = \frac{1}{|R_k|} \sum_{i:\, \mathbf{x}^{(i)} \in R_k} y^{(i)},
+  \label{eq:tree}
+\end{equation}
+where $|R_k|$ is the number of training points in region $R_k$. The hypothesis space is
+therefore the set of piecewise constant functions defined by such axis-aligned splits, with
+the tree limited to a depth of at most $D$. We tried $D = 2$ to $20$ and chose the depth with
+the lowest validation error, since a tree that is too deep memorises the training data.
+
+We chose a tree because it makes no assumption about the shape of the relationship. It can
+follow the flattening of the temperature curve, and it finds interactions between features
+on its own, without us listing them as in the polynomial model. It also suits the weekday
+and month features, which are stored as integers: a tree can separate weekends from working
+days or winter from summer with one or two splits, whereas a polynomial has to treat those
+integers as a numeric scale. Each split is chosen to minimize the squared error within the
+resulting regions, so the tree is trained with the same loss as the polynomial regression.
+
+\paragraph{Random forest.}
+The third model is a random forest, which predicts the average of $B = 100$ regression
+trees $h^{(1)}, \dots, h^{(B)}$ of the form~\eqref{eq:tree}:
+\begin{equation}
+  h(\mathbf{x}) = \frac{1}{B} \sum_{b=1}^{B} h^{(b)}(\mathbf{x}).
+  \label{eq:forest}
+\end{equation}
+Each tree is trained on a bootstrap sample of the training set, drawn with replacement, and
+at every split only a random subset of $m_{\text{feat}}$ features is considered. The
+hypothesis space is thus the set of averages of 100 such trees. These are still piecewise
+constant functions, but with far finer steps than a single tree. The trees are not
+depth-limited; instead each leaf must contain at least $n_{\min}$ training points. We tried
+$m_{\text{feat}} = 1$ to $7$ and $n_{\min} \in \{1, 10\}$ and chose the combination with the
+lowest validation error, keeping the number of trees fixed at 100.
+
+A single tree is unstable: a small change in the training data can change its splits and
+predictions noticeably. Averaging many trees that have each seen slightly different data and
+features reduces this variance while keeping the tree's ability to model non-linear effects
+and interactions. The random forest is the most flexible of our three models, so comparing
+it with the polynomial regression shows whether that extra flexibility is useful for this
+problem. The individual trees are trained with squared error, as above.
+
 \subsection{Model validation}
+\label{sec:validation}
 
 For model validation the dataset was split chronologically by calendar year. The years
-2020--2023 were used for training (34\,717 data points, 66.5\%), 2024 for validation
-(8\,778 data points, 16.8\%) and 2025 for testing (8\,746 data points, 16.7\%).
+2020--2023 were used for training (34\,717 data points, 66.5\,\%), 2024 for validation
+(8\,778 data points, 16.8\,\%) and 2025 for testing (8\,746 data points, 16.7\,\%). The
+test set was set aside and used only once, to evaluate the final chosen model.
 
-We chose this chronological split instead of a random one as we intend to use the model to
-predict future consumption based on the weather and time data. Thus the validation and test
-sets must represent time periods the model has not seen during training. Second, consumption
-in consecutive hours is highly correlated, so a random split would place nearly identical data
-points in both the training and validation sets. Thus it could give an over-optimistic estimate
-of its performance when the model interpolates between hours.
+We chose a chronological split instead of a random one for two reasons. First, the model is
+meant to predict future consumption, so the validation and test sets must come from periods
+it has not seen during training. Second, consumption in consecutive hours is highly
+correlated, so a random split would place nearly identical data points in both the training
+and validation sets and give an over-optimistic error estimate.
 
 Splitting on whole calendar years also ensures that each set covers a complete annual cycle.
 Had the split been made at an arbitrary point in time, the test set might have contained only
 summer or only winter months, and the reported error would have reflected a single season
 rather than year-round performance.
 
-%==============================================================
-\section{Use of AI}
+Errors on a set of $n$ data points with predictions $\hat{y}^{(i)} = h(\mathbf{x}^{(i)})$ are
+reported as the root mean squared error, the mean absolute percentage error and the
+coefficient of determination:
+\begin{equation}
+  \begin{gathered}
+  \text{RMSE} = \sqrt{\frac{1}{n}\sum_{i=1}^{n} \bigl(y^{(i)} - \hat{y}^{(i)}\bigr)^2},
+  \qquad
+  \text{MAPE} = \frac{100\,\%}{n}\sum_{i=1}^{n} \frac{\bigl|y^{(i)} - \hat{y}^{(i)}\bigr|}{y^{(i)}},
+  \\[0.5em]
+  R^2 = 1 - \frac{\sum_{i=1}^{n} \bigl(y^{(i)} - \hat{y}^{(i)}\bigr)^2}{\sum_{i=1}^{n} \bigl(y^{(i)} - \bar{y}\bigr)^2},
+  \end{gathered}
+  \label{eq:metrics}
+\end{equation}
+where $\bar{y}$ is the mean consumption of the evaluated set. RMSE is the square root of the
+average squared error loss~\eqref{eq:loss} and is in MWh, MAPE is the average absolute error
+as a percentage of actual consumption, and $R^2$ is the share of the variance in consumption
+explained by the model, relative to the variance of the evaluated set. Only the squared error
+loss is used for training, and validation RMSE was used for choosing hyperparameters and the
+final model.
 
-We used AI to help write the R scripts to draw the plots. AI was also used to fix grammar and format the LaTeX document.
+%==============================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Training and validation errors}
+\label{sec:val-errors}
+
+Each model's hyperparameters were chosen by validation error (Section~\ref{sec:models}). For
+the polynomial regression the validation RMSE was 777, 543, 561 and 563\,MWh for degrees 1 to
+4, so degree~2 was chosen. The best settings for the other models were maximum depth $D = 9$
+for the decision tree, and $m_{\text{feat}} = 4$ with $n_{\min} = 10$ for the random forest.
+Table~\ref{tab:results} shows the resulting errors.
+
+\begin{table}[H]
+  \centering
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    Method & \multicolumn{2}{c}{RMSE (MWh)} & \multicolumn{2}{c}{MAPE} & \multicolumn{2}{c}{$R^2$} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+           & Train & Val & Train & Val & Train & Val \\
+    \midrule
+    Polynomial regression ($d = 2$) & 515 & \textbf{543} & 4.43\,\% & \textbf{4.36\,\%} & 0.882 & \textbf{0.900} \\
+    Decision tree ($D = 9$)         & 457 & 619          & 3.86\,\% & 4.79\,\%          & 0.907 & 0.870 \\
+    Random forest ($m_{\text{feat}} = 4$, $n_{\min} = 10$) & 351 & 568 & 2.94\,\% & 4.42\,\% & 0.945 & 0.890 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Training (2020--2023) and validation (2024) errors of the three methods with
+  their best hyperparameters. The best validation value in each column is in bold.}
+  \label{tab:results}
+\end{table}
+
+The decision tree has the highest validation error. Its training error is low, but it does
+not carry over to new data, which is typical for a single deep tree. The random forest has
+the lowest training error and the largest gap between training and validation error, so it
+fits the training data more closely than the others, yet its validation error is still
+higher than that of the polynomial regression.
+
+\subsection{Final chosen method}
+
+The final chosen method is polynomial regression of degree 2, since it has the lowest
+validation error on every measure (RMSE 543\,MWh, MAPE 4.36\,\% and $R^2 = 0.900$, compared
+with 568\,MWh, 4.42\,\% and 0.890 for the random forest). It is also the simplest of the
+three models, with 36 weights, and its training and validation errors are close to each
+other (515 vs.\ 543\,MWh), which suggests it does not overfit.
+
+\subsection{Test error of the final method}
+
+The chosen model was evaluated once on the test set (the year 2025, 8\,746 data points). The
+test set was not used for training or for choosing any setting. The test errors were
+RMSE = 804\,MWh, MAPE = 6.81\,\% and $R^2 = 0.669$, clearly worse than on the validation set.
+
+Most of this increase comes from a systematic offset. On average the model underestimates
+2025 consumption by 625\,MWh, about 6.5\,\% of the mean test-year consumption of
+9\,652\,MWh; the mean over the training years was 9\,172\,MWh. With this constant offset
+removed, the test RMSE is 505\,MWh, about the same as the training error (515\,MWh). The
+model therefore captures how consumption varies with weather and time of day, but it cannot
+predict a change in the overall consumption level between years, because none of the
+features describes such long-term trends. $R^2$ falls further because it is relative to the
+variance of the evaluated set (Section~\ref{sec:validation}), and consumption varied less in
+2025 (standard deviation 1\,396\,MWh vs.\ 1\,714\,MWh in 2024), so the same error is a larger
+share of the total variation. For comparison, the random forest reached a slightly lower test
+RMSE (768\,MWh), but this was not used in choosing the model.
+
+%==============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+This study compared polynomial regression (degree 2), a decision tree and a random forest for
+predicting Finland's hourly electricity consumption from weather and time features. All three
+explained most of the variation on the 2024 validation data ($R^2$ 0.870--0.900).
+Temperature was by far the strongest predictor ($r = -0.77$), while wind and humidity were
+much weaker. Polynomial regression of degree 2 was chosen because it had the lowest
+validation error on every measure (RMSE 543\,MWh, MAPE 4.36\,\%, $R^2 = 0.900$). The
+tree-based models fit the training data better (random forest training RMSE 351\,MWh) but
+generalised worse, which suggests the relationship is mostly smooth and their extra
+flexibility brought little benefit.
+
+On the 2025 test set the chosen model reached RMSE = 804\,MWh, clearly worse than on
+validation. Most of the increase was a systematic underestimate of 625\,MWh. Without it the
+test RMSE would be 505\,MWh, in line with the training error. The model therefore captures
+how consumption varies with weather and time, but not changes in the overall consumption
+level between years. The random forest's slightly lower test RMSE (768\,MWh) did not
+influence the choice, which was made on validation alone.
+
+The results are therefore not optimal, and the study has several limitations. Only one year
+each was used for validation and testing, so the estimates reflect the weather and demand of
+those years. No feature describes long-term changes such as electrification, heat pumps or
+industrial changes. Weather data comes from a single station while consumption is national,
+and public holidays are not included. The polynomial can also give unrealistic predictions
+outside the training range, and a random forest cannot extrapolate at all.
+
+Future work could use rolling-origin validation, training on all past years and testing on
+the following one, to get error estimates that do not depend on a single year. The features
+could be extended with weather from several stations and with public holidays, and the model
+could be given information about the overall consumption level, for example the previous
+year's average consumption as a feature, or be retrained on the most recent data.
+
+%==============================================================
+\section*{Use of generative AI}
+
+Generative AI (Claude, Anthropic) was used to help write the R scripts that draw the plots,
+to review drafts of this report against the peer-review criteria, to suggest edits to the
+wording and to format the \LaTeX{} document. The data processing, model training, results and
+interpretation are the authors' own work, and all AI-suggested text was reviewed and edited
+by the authors.
 
 %==============================================================
 %  References -- entries live in references.bib and are numbered
@@ -278,9 +467,9 @@ We used AI to help write the R scripts to draw the plots. AI was also used to fi
 \bibliography{references}
 
 %==============================================================
-\appendix
-\section*{Appendix}
+\section{Appendix: code}
 
-Code: \url{https://github.com/Erkkuleo/ML-project-predicting-consumption-from-weather}
+The code for data preparation, plotting and model training is available at
+\url{https://anonymous.4open.science/r/ML-project-predicting-consumption-from-weather-F0CB/}.
 
 \end{document}
