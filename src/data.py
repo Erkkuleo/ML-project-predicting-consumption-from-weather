@@ -16,8 +16,11 @@ def read_data():
 
     df_test = pd.read_csv('data/test.csv')
 
+    df_val = pd.read_csv('data/val.csv')
+
     df.drop(columns=['time_utc', 'local_time', 'is_weekend', 'hour'], inplace=True)
     df_test.drop(columns=['time_utc', 'local_time', 'is_weekend', 'hour'], inplace=True)
+    df_val.drop(columns=['time_utc', 'local_time', 'is_weekend', 'hour'], inplace=True)
 
     X = df[features].to_numpy()
     y = df['consumption_mwh'].to_numpy()
@@ -25,4 +28,8 @@ def read_data():
     X_test = df_test[features].to_numpy()
     y_test = df_test['consumption_mwh'].to_numpy()
 
-    return X, y, X_test, y_test
+
+    X_val = df_val[features].to_numpy()
+    y_val = df_val['consumption_mwh'].to_numpy()
+
+    return X, y, X_test, y_test, X_val, y_val
